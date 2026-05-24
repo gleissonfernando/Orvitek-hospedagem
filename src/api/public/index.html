@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bot Orvitek Hospedagem</title>
+    <style>
+      body {
+        color: #172026;
+        font-family: Arial, sans-serif;
+        margin: 32px auto;
+        max-width: 860px;
+      }
+
+      form,
+      section {
+        border: 1px solid #d4dbe3;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        padding: 16px;
+      }
+
+      label {
+        display: block;
+        font-size: 14px;
+        margin-top: 12px;
+      }
+
+      input {
+        box-sizing: border-box;
+        font: inherit;
+        margin-top: 4px;
+        padding: 10px;
+        width: 100%;
+      }
+
+      button {
+        cursor: pointer;
+        font: inherit;
+        margin-right: 8px;
+        margin-top: 14px;
+        padding: 10px 12px;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #d4dbe3;
+        padding: 10px;
+        text-align: left;
+      }
+
+      .muted {
+        color: #52606d;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Bot Orvitek Hospedagem</h1>
+    <p id="health" class="muted">Verificando API...</p>
+
+    <form id="connect-form">
+      <h2>Conectar bot</h2>
+
+      <label>
+        Seu ID no painel
+        <input id="user-id" autocomplete="off" required />
+      </label>
+
+      <label>
+        ID do servidor
+        <input id="guild-id" autocomplete="off" required />
+      </label>
+
+      <label>
+        Discord ID para apagar mensagens
+        <input id="target-user-id" autocomplete="off" required />
+      </label>
+
+      <label>
+        Client ID do bot
+        <input id="client-id" autocomplete="off" required />
+      </label>
+
+      <label>
+        Token do bot
+        <input id="bot-token" autocomplete="off" type="password" required />
+      </label>
+
+      <button type="submit">Conectar</button>
+      <button id="mock-connect" type="button">Cadastrar mock</button>
+      <p id="message" class="muted"></p>
+    </form>
+
+    <section>
+      <h2>Bots cadastrados</h2>
+      <button id="refresh" type="button">Atualizar lista</button>
+      <table>
+        <thead>
+          <tr>
+            <th>Servidor</th>
+            <th>Discord ID</th>
+            <th>Client ID</th>
+            <th>Bot</th>
+            <th>Status</th>
+            <th>Token</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody id="bots"></tbody>
+      </table>
+    </section>
+
+    <script>
+      const userIdInput = document.querySelector("#user-id");
+      const guildIdInput = document.querySelector("#guild-id");
+      const targetUserIdInput = document.querySelector("#target-user-id");
+      const clientIdInput = document.querySelector("#client-id");
+      const message = document.querySelector("#message");
+      const botsBody = document.querySelector("#bots");
+      const params = new URLSearchParams(window.location.search);
+
+      userIdInput.value = params.get("userId") || "";
+      guildIdInput.value = params.get("guildId") || "";
+      targetUserIdInput.value = params.get("targetUserId") || params.get("discordId") || userIdInput.value;
+      clientIdInput.value = params.get("clientId") || "";
+
+      function headers() {
+        return {
+          "content-type": "application/json",
+          "x-user-id": userIdInput.value.trim()
+        };
+      }
+
+      async function request(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: { ...headers(), ...(options.headers || {}) }
+        });
+        return response.json();
+      }
+
+      async function loadBots() {
+        if (!userIdInput.value.trim()) {
+          return;
+        }
+
+        const data = await request("/api/user-bots");
+        botsBody.innerHTML = "";
+
+        for (const bot of data.bots || []) {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${bot.guildId}</td>
+            <td>${bot.targetUserId || ""}</td>
+            <td>${bot.clientId}</td>
+            <td>${bot.botUsername || ""}</td>
+            <td>${bot.status}</td>
+            <td>************</td>
+            <td>
+              <input data-token="${bot.clientId}" type="password" placeholder="Novo token" />
+              <button data-update="${bot.clientId}" type="button">Trocar</button>
+              <button data-remove="${bot.clientId}" type="button">Remover</button>
+            </td>
+          `;
+          botsBody.appendChild(row);
+        }
+      }
+
+      async function loadHealth() {
+        const health = document.querySelector("#health");
+
+        try {
+          const response = await fetch("/health");
+          const data = await response.json();
+          health.textContent = data.mongoConnected
+            ? "API online. MongoDB conectado."
+            : "API online. MongoDB ainda nao conectado.";
+        } catch {
+          health.textContent = "API offline.";
+        }
+      }
+
+      document.querySelector("#connect-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const botTokenInput = document.querySelector("#bot-token");
+        const data = await request("/api/user-bots/connect", {
+          method: "POST",
+          body: JSON.stringify({
+            guildId: document.querySelector("#guild-id").value.trim(),
+            targetUserId: targetUserIdInput.value.trim(),
+            clientId: clientIdInput.value.trim(),
+            botToken: botTokenInput.value
+          })
+        });
+
+        botTokenInput.value = "";
+        message.textContent = data.message || "Erro";
+        await loadBots();
+      });
+
+      document.querySelector("#refresh").addEventListener("click", loadBots);
+      document.querySelector("#mock-connect").addEventListener("click", async () => {
+        const data = await request("/api/dev/mock-user-bot", {
+          method: "POST",
+          body: JSON.stringify({
+            guildId: guildIdInput.value.trim(),
+            targetUserId: targetUserIdInput.value.trim(),
+            clientId: clientIdInput.value.trim()
+          })
+        });
+
+        message.textContent = data.message || "Erro";
+        await loadBots();
+      });
+      loadHealth();
+      setInterval(loadHealth, 5000);
+
+      botsBody.addEventListener("click", async (event) => {
+        const target = event.target;
+
+        if (!(target instanceof HTMLButtonElement)) {
+          return;
+        }
+
+        const updateClientId = target.dataset.update;
+        const removeClientId = target.dataset.remove;
+
+        if (updateClientId) {
+          const input = document.querySelector(`[data-token="${updateClientId}"]`);
+          const data = await request("/api/user-bots/update-token", {
+            method: "POST",
+            body: JSON.stringify({ clientId: updateClientId, botToken: input.value })
+          });
+          input.value = "";
+          message.textContent = data.message || "Erro";
+        }
+
+        if (removeClientId) {
+          const data = await request(`/api/user-bots/${removeClientId}/token`, {
+            method: "DELETE"
+          });
+          message.textContent = data.message || "Erro";
+        }
+
+        await loadBots();
+      });
+    </script>
+  </body>
+</html>
