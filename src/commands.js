@@ -18,6 +18,10 @@ const commands = [
     .setDescription("Abre o painel gerenciador dos bots hospedados.")
     .toJSON(),
   new SlashCommandBuilder()
+    .setName("painel-gerenciar")
+    .setDescription("Abre o painel de ferramentas de gerenciamento.")
+    .toJSON(),
+  new SlashCommandBuilder()
     .setName("gerenciar")
     .setDescription("Mostra os bots cadastrados, donos e status.")
     .addUserOption((option) =>

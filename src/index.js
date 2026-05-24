@@ -389,6 +389,36 @@ function buildManagerPanel() {
   ], row);
 }
 
+function buildManagementToolsPanel() {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("management:fivem-fac")
+      .setLabel("fac FiveM")
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  return buildV2Panel([
+    "## Painel gerenciar",
+    "Escolha uma ferramenta para configurar regras e funcoes.",
+    "",
+    "A ferramenta fac FiveM sera usada para as regras de faccao FiveM."
+  ], row);
+}
+
+function buildFiveMFacPanel() {
+  return buildV2Panel([
+    "## fac FiveM",
+    "Area de regras para faccao FiveM.",
+    "",
+    "As proximas configuracoes de fac FiveM serao adicionadas aqui."
+  ], new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("management:back")
+      .setLabel("Voltar")
+      .setStyle(ButtonStyle.Secondary)
+  ));
+}
+
 function formatPlanStatus(bot) {
   const expired = bot.planExpiresAt && new Date(bot.planExpiresAt).getTime() <= Date.now();
 
@@ -956,7 +986,7 @@ panelClient.once(Events.ClientReady, async (client) => {
   console.log(`Bot do painel online: ${client.user.tag}`);
   try {
     await registerCommands(config.panelClientId || client.user.id);
-    console.log("Comandos /painel, /panel, /hospedagem, /painel-gerenciador e /gerenciar registrados.");
+    console.log("Comandos /painel, /panel, /hospedagem, /painel-gerenciador, /painel-gerenciar e /gerenciar registrados.");
   } catch (error) {
     console.error("Nao foi possivel registrar os comandos:", error.message);
   }
@@ -982,8 +1012,23 @@ panelClient.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.isChatInputCommand() && interaction.commandName === "painel-gerenciar") {
+    await interaction.reply(buildManagementToolsPanel());
+    return;
+  }
+
   if (interaction.isChatInputCommand() && interaction.commandName === "gerenciar") {
     await handleManageCommand(interaction);
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === "management:fivem-fac") {
+    await interaction.update(buildFiveMFacPanel());
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === "management:back") {
+    await interaction.update(buildManagementToolsPanel());
     return;
   }
 
