@@ -28,6 +28,7 @@ const config = getConfig();
 const snowflakeRegex = /^\d{17,20}$/;
 const dataDir = path.join(__dirname, "..", "data");
 const registryPath = path.join(dataDir, "fivem-users.json");
+const fivemFacPath = path.join(dataDir, "fivem-fac.json");
 const panelImageName = "orvitek-bots-hospedagem.png";
 const panelImagePath = path.join(__dirname, "assets", panelImageName);
 
@@ -162,6 +163,117 @@ function readRegistry() {
 function writeRegistry(registry) {
   ensureRegistry();
   fs.writeFileSync(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+}
+
+function readJsonFile(filePath, fallback) {
+  ensureRegistry();
+
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, `${JSON.stringify(fallback, null, 2)}\n`, "utf8");
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonFile(filePath, data) {
+  ensureRegistry();
+  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+function readFiveMFacStore() {
+  const store = readJsonFile(fivemFacPath, { guilds: {} });
+  if (!store.guilds || typeof store.guilds !== "object") {
+    store.guilds = {};
+  }
+  return store;
+}
+
+function getFiveMGuildStore(store, guildId) {
+  if (!store.guilds[guildId]) {
+    store.guilds[guildId] = {
+      tokens: {},
+      users: {}
+    };
+  }
+
+  if (!store.guilds[guildId].tokens) {
+    store.guilds[guildId].tokens = {};
+  }
+
+  if (!store.guilds[guildId].users) {
+    store.guilds[guildId].users = {};
+  }
+
+  return store.guilds[guildId];
+}
+
+function hasFiveMFacAccess(guildId, userId) {
+  if (!guildId || !userId) {
+    return false;
+  }
+
+  const store = readFiveMFacStore();
+  const guildStore = getFiveMGuildStore(store, guildId);
+  return guildStore.users[userId]?.access === true;
+}
+
+function generateFiveMFacToken(guildId, createdBy) {
+  const store = readFiveMFacStore();
+  const guildStore = getFiveMGuildStore(store, guildId);
+  let token = null;
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const candidate = String(Math.floor(1000 + Math.random() * 9000));
+    if (!guildStore.tokens[candidate] || guildStore.tokens[candidate].status === "used") {
+      token = candidate;
+      break;
+    }
+  }
+
+  if (!token) {
+    throw new Error("Nao foi possivel gerar um token disponivel para este servidor.");
+  }
+
+  guildStore.tokens[token] = {
+    status: "available",
+    createdBy,
+    createdAt: new Date().toISOString(),
+    usedBy: null,
+    usedAt: null
+  };
+
+  writeJsonFile(fivemFacPath, store);
+  return token;
+}
+
+function activateFiveMFacToken(guildId, userId, token) {
+  const store = readFiveMFacStore();
+  const guildStore = getFiveMGuildStore(store, guildId);
+  const tokenData = guildStore.tokens[token];
+
+  if (!tokenData || tokenData.status !== "available") {
+    return {
+      ok: false,
+      message: "Token invalido ou ja utilizado."
+    };
+  }
+
+  tokenData.status = "used";
+  tokenData.usedBy = userId;
+  tokenData.usedAt = new Date().toISOString();
+  guildStore.users[userId] = {
+    access: true,
+    token,
+    activatedAt: tokenData.usedAt,
+    config: guildStore.users[userId]?.config || {}
+  };
+
+  writeJsonFile(fivemFacPath, store);
+  return { ok: true };
 }
 
 function saveRegistration(discordUserId, registration) {
@@ -405,18 +517,76 @@ function buildManagementToolsPanel() {
   ], row);
 }
 
-function buildFiveMFacPanel() {
+function buildFiveMFacAccessPanel(isAdmin = false) {
+  const accessRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("fivem-fac:buy-token")
+      .setLabel("Comprar token")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("fivem-fac:use-token")
+      .setLabel("Usar token")
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  const rows = [accessRow];
+
+  if (isAdmin) {
+    rows.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("fivem-fac:generate-token")
+        .setLabel("Gerar token")
+        .setStyle(ButtonStyle.Secondary)
+    ));
+  }
+
   return buildV2Panel([
     "## fac FiveM",
-    "Area de regras para faccao FiveM.",
+    "Essa ferramenta precisa de um token de acesso de 4 digitos.",
     "",
-    "As proximas configuracoes de fac FiveM serao adicionadas aqui."
+    "Cada servidor Discord tem seus proprios tokens, acessos e configuracoes.",
+    "Usar um token aqui libera somente o painel fac FiveM para voce neste servidor."
+  ], rows);
+}
+
+function buildFiveMFacPanel(guildId, userId) {
+  const store = readFiveMFacStore();
+  const guildStore = getFiveMGuildStore(store, guildId);
+  const userConfig = guildStore.users[userId]?.config || {};
+
+  return buildV2Panel([
+    "## fac FiveM",
+    "Painel liberado por token.",
+    "",
+    `Servidor configurado: ${guildId}`,
+    `Usuario configurando: <@${userId}>`,
+    `Regras cadastradas: ${Array.isArray(userConfig.rules) ? userConfig.rules.length : 0}`,
+    "",
+    "As proximas regras e componentes de faccao FiveM serao adicionados aqui sem misturar configuracoes de outros servidores ou usuarios."
   ], new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("management:back")
       .setLabel("Voltar")
       .setStyle(ButtonStyle.Secondary)
   ));
+}
+
+function buildFiveMTokenModal() {
+  const tokenInput = new TextInputBuilder()
+    .setCustomId("token")
+    .setLabel("Token de acesso")
+    .setPlaceholder("Digite os 4 digitos")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMinLength(4)
+    .setMaxLength(4);
+
+  return new ModalBuilder()
+    .setCustomId("modal:fivem-fac-token")
+    .setTitle("Liberar fac FiveM")
+    .addComponents(
+      new ActionRowBuilder().addComponents(tokenInput)
+    );
 }
 
 function formatPlanStatus(bot) {
@@ -564,6 +734,75 @@ async function handleManagerSyncHierarchy(interaction) {
   }
 
   await interaction.editReply(result.data.message || "Comandos de hierarquia sincronizados.");
+}
+
+async function handleFiveMFacEntry(interaction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Use essa ferramenta dentro de um servidor.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (hasFiveMFacAccess(interaction.guildId, interaction.user.id)) {
+    await interaction.update(buildFiveMFacPanel(interaction.guildId, interaction.user.id));
+    return;
+  }
+
+  await interaction.update(buildFiveMFacAccessPanel(isPanelAdmin(interaction.user.id)));
+}
+
+async function handleFiveMFacBuyToken(interaction) {
+  await interaction.reply({
+    content: "Para comprar um token fac FiveM, chame a equipe Orvitek. Depois use o botao Usar token e digite os 4 digitos recebidos.",
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function handleFiveMFacGenerateToken(interaction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Use essa ferramenta dentro de um servidor.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!isPanelAdmin(interaction.user.id)) {
+    await interaction.reply({ content: "Apenas administradores podem gerar tokens.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  let token;
+  try {
+    token = generateFiveMFacToken(interaction.guildId, interaction.user.id);
+  } catch (error) {
+    await interaction.reply({ content: error.message, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.reply({
+    content: `Token fac FiveM gerado para este servidor: ${token}\nEnvie esse token somente para o cliente que comprou o acesso.`,
+    flags: MessageFlags.Ephemeral
+  });
+}
+
+async function handleFiveMFacTokenSubmit(interaction) {
+  if (!interaction.guildId) {
+    await interaction.reply({ content: "Use essa ferramenta dentro de um servidor.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const token = interaction.fields.getTextInputValue("token").trim();
+
+  if (!/^\d{4}$/.test(token)) {
+    await interaction.reply({ content: "O token precisa ter exatamente 4 digitos.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const result = activateFiveMFacToken(interaction.guildId, interaction.user.id, token);
+
+  if (!result.ok) {
+    await interaction.reply({ content: result.message, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await interaction.reply(buildFiveMFacPanel(interaction.guildId, interaction.user.id));
 }
 
 function buildRegisterModal(previous = {}, currentGuildId = null) {
@@ -1013,6 +1252,11 @@ panelClient.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (interaction.isChatInputCommand() && interaction.commandName === "painel-gerenciar") {
+    if (interaction.guildId && hasFiveMFacAccess(interaction.guildId, interaction.user.id)) {
+      await interaction.reply(buildFiveMFacPanel(interaction.guildId, interaction.user.id));
+      return;
+    }
+
     await interaction.reply(buildManagementToolsPanel());
     return;
   }
@@ -1023,12 +1267,32 @@ panelClient.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (interaction.isButton() && interaction.customId === "management:fivem-fac") {
-    await interaction.update(buildFiveMFacPanel());
+    await handleFiveMFacEntry(interaction);
     return;
   }
 
   if (interaction.isButton() && interaction.customId === "management:back") {
+    if (interaction.guildId && hasFiveMFacAccess(interaction.guildId, interaction.user.id)) {
+      await interaction.update(buildFiveMFacPanel(interaction.guildId, interaction.user.id));
+      return;
+    }
+
     await interaction.update(buildManagementToolsPanel());
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === "fivem-fac:buy-token") {
+    await handleFiveMFacBuyToken(interaction);
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === "fivem-fac:use-token") {
+    await interaction.showModal(buildFiveMTokenModal());
+    return;
+  }
+
+  if (interaction.isButton() && interaction.customId === "fivem-fac:generate-token") {
+    await handleFiveMFacGenerateToken(interaction);
     return;
   }
 
@@ -1099,6 +1363,11 @@ panelClient.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.type === InteractionType.ModalSubmit && interaction.customId === "modal:bot-delete") {
     await handleDeleteSubmit(interaction);
+    return;
+  }
+
+  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === "modal:fivem-fac-token") {
+    await handleFiveMFacTokenSubmit(interaction);
   }
 });
 
