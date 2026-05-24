@@ -30,6 +30,7 @@ exports.apiConfig = {
     orvitekMainBotNotifyUrl: process.env.ORVITEK_MAIN_BOT_NOTIFY_URL || "",
     orvitekMainBotNotifyToken: process.env.ORVITEK_MAIN_BOT_NOTIFY_TOKEN || "",
     corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    hostedBotsEnableMemberEvents: process.env.HOSTED_BOTS_ENABLE_MEMBER_EVENTS === "true" || process.env.ENABLE_MEMBER_EVENTS === "true",
     enableDevMockBots: process.env.ENABLE_DEV_MOCK_BOTS === "true",
     nodeEnv: process.env.NODE_ENV || "development"
 };

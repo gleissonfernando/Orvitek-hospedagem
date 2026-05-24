@@ -8,11 +8,11 @@ async function validateBotToken(botToken) {
         }
     });
     if (!response.ok) {
-        throw new Error("Token invalido ou bot inacessivel");
+        throw new Error(`Token recusado pelo Discord (HTTP ${response.status}). Confira se voce copiou o token do bot, sem "Bot " antes e sem espacos.`);
     }
     const user = (await response.json());
     if (!user.bot) {
-        throw new Error("Token invalido ou bot inacessivel");
+        throw new Error("Esse token nao pertence a um bot do Discord.");
     }
     return user;
 }

@@ -7,7 +7,8 @@ import { botManager } from "../services/BotManager";
 import { validateBotToken } from "../services/discordToken";
 import { notifyMainBotBotRegistered } from "../services/OrvitekMainBotNotifier";
 import { checkHostingRegistrationPermission } from "../services/HostingRegistrationPermission";
-import { deleteUserBot, findUserBot, listUserBots, updateUserBot, upsertUserBot, type LocalUserBot } from "../storage/userBotStore";
+import { checkFiveMFacToken, useFiveMFacToken } from "../services/FiveMFacTokenStore";
+import { deleteUserBot, findUserBot, listUserBots, updateUserBot, upsertUserBot } from "../storage/userBotStore";
 
 const router = Router();
 
@@ -16,13 +17,46 @@ const connectSchema = z.object({
   targetUserId: z.string().trim(),
   clientId: z.string().trim(),
   hostingAccessKey: z.string().trim().optional(),
+  fivemFacToken: z.string().trim().regex(/^\d{4}$/).optional(),
+  activationCode: z.string().trim().regex(/^\d{4}$/).optional(),
   botToken: z.string().min(20)
+}).refine((data) => Boolean(data.activationCode || data.fivemFacToken), {
+  message: "Codigo de ativacao obrigatorio",
+  path: ["activationCode"]
 });
 
 const updateTokenSchema = z.object({
   clientId: z.string().trim(),
   botToken: z.string().min(20)
 });
+
+function inaccessibleBotMessage(guildId: string): string {
+  return `Token validado, mas o bot nao conseguiu acessar o servidor ${guildId}. Convide esse bot no servidor informado com escopo bot/applications.commands e permissao Manage Messages.`;
+}
+
+async function restoreOrDeleteAttempt(userId: string, clientId: string, authorized: Awaited<ReturnType<typeof findUserBot>>): Promise<void> {
+  if (!authorized) {
+    await deleteUserBot(userId, clientId);
+    return;
+  }
+
+  await updateUserBot(userId, clientId, {
+    guildId: authorized.guildId,
+    targetUserId: authorized.targetUserId,
+    hostingAccessKey: authorized.hostingAccessKey,
+    hostingAccessGranted: authorized.hostingAccessGranted,
+    projectName: authorized.projectName,
+    encryptedToken: authorized.encryptedToken,
+    botUsername: authorized.botUsername,
+    botId: authorized.botId,
+    status: authorized.status,
+    planStatus: authorized.planStatus,
+    planStartedAt: authorized.planStartedAt,
+    planExpiresAt: authorized.planExpiresAt,
+    lastPaymentAmountCents: authorized.lastPaymentAmountCents,
+    lastPaymentAt: authorized.lastPaymentAt
+  });
+}
 
 function publicBot(bot: {
   clientId: string;
@@ -57,10 +91,11 @@ function publicBot(bot: {
   };
 }
 
-async function hasPaidActiveAccess(bot: LocalUserBot | null, providedAccessKey?: string): Promise<{ allowed: boolean; accessKey?: string }> {
-  const accessKey = providedAccessKey || bot?.hostingAccessKey;
+async function hasPaidActiveAccess(providedAccessKey?: string): Promise<{ allowed: boolean; accessKey?: string }> {
+  const accessKey = providedAccessKey;
 
   if (!accessKey) {
+    console.log("[user-bots/connect] accessKey nao informada");
     return { allowed: false };
   }
 
@@ -69,17 +104,7 @@ async function hasPaidActiveAccess(bot: LocalUserBot | null, providedAccessKey?:
     return { allowed: false, accessKey };
   }
 
-  if (!bot) {
-    return { allowed: true, accessKey };
-  }
-
-  const expiresAt = bot.planExpiresAt ? new Date(bot.planExpiresAt).getTime() : 0;
-  const hasActivePlan = bot.planStatus === "active" && expiresAt > Date.now();
-  const hasPayment = Boolean(bot.lastPaymentAt && bot.lastPaymentAmountCents && bot.lastPaymentAmountCents > 0);
-  const releasedByOrvitek = bot.hostingAccessGranted === true || Boolean(bot.hostingAccessKey);
-  const legacyActiveRegistration = Boolean(bot.encryptedToken && bot.status === "online" && bot.planStatus !== "overdue" && !bot.planExpiresAt);
-
-  return { allowed: legacyActiveRegistration || (hasActivePlan && hasPayment && releasedByOrvitek), accessKey };
+  return { allowed: true, accessKey };
 }
 
 router.use(requireUser);
@@ -93,6 +118,12 @@ router.post("/connect", async (req, res) => {
   }
 
   const { guildId, targetUserId, clientId, hostingAccessKey, botToken } = parsed.data;
+  const activationCode = parsed.data.activationCode || parsed.data.fivemFacToken;
+
+  if (!activationCode) {
+    res.status(400).json({ success: false, message: "Codigo de ativacao obrigatorio" });
+    return;
+  }
 
   try {
     assertSnowflake(guildId, "guildId");
@@ -105,7 +136,7 @@ router.post("/connect", async (req, res) => {
 
   try {
     const authorized = await findUserBot(req.userId, clientId);
-    const access = await hasPaidActiveAccess(authorized, hostingAccessKey);
+    const access = await hasPaidActiveAccess(hostingAccessKey);
 
     if (!access.allowed) {
       res.status(403).json({
@@ -115,10 +146,25 @@ router.post("/connect", async (req, res) => {
       return;
     }
 
+    const facAvailability = checkFiveMFacToken({
+      guildId,
+      token: activationCode,
+      userId: req.userId
+    });
+
+    if (!facAvailability.ok) {
+      console.log(`[user-bots/connect] codigo de ativacao invalido/usado guildId=${guildId} userId=${req.userId} code=${activationCode} message=${facAvailability.message}`);
+      res.status(400).json({ success: false, message: facAvailability.message });
+      return;
+    }
+
     const discordUser = await validateBotToken(botToken);
 
     if (discordUser.id !== clientId) {
-      res.status(400).json({ success: false, message: "Token invalido ou bot inacessivel" });
+      res.status(400).json({
+        success: false,
+        message: `O token pertence ao bot ${discordUser.id}, mas o Client ID informado foi ${clientId}.`
+      });
       return;
     }
 
@@ -146,12 +192,29 @@ router.post("/connect", async (req, res) => {
     const status = await botManager.restartBot(req.userId, clientId);
 
     if (status !== "online") {
-      await deleteUserBot(req.userId, clientId);
-      res.status(400).json({ success: false, message: "Token invalido ou bot inacessivel" });
+      await restoreOrDeleteAttempt(req.userId, clientId, authorized);
+      res.status(400).json({ success: false, message: inaccessibleBotMessage(guildId) });
       return;
     }
 
+    const facActivation = useFiveMFacToken({
+      guildId,
+      token: activationCode,
+      userId: req.userId
+    });
+
+    if (!facActivation.ok) {
+      await botManager.stopBot(req.userId, clientId);
+      await restoreOrDeleteAttempt(req.userId, clientId, authorized);
+      console.log(`[user-bots/connect] codigo de ativacao invalido/usado guildId=${guildId} userId=${req.userId} code=${activationCode} message=${facActivation.message}`);
+      res.status(400).json({ success: false, message: facActivation.message });
+      return;
+    }
+
+    console.log(`[user-bots/connect] codigo de ativacao consumido com sucesso guildId=${guildId} userId=${req.userId} code=${activationCode}`);
+    await botManager.restartBot(req.userId, clientId);
     notifyMainBotBotRegistered(saved, status);
+    console.log(`[user-bots/connect] bot conectado com sucesso userId=${req.userId} clientId=${clientId} guildId=${guildId} accessKey=${access.accessKey}`);
 
     res.json({
       success: true,
@@ -164,7 +227,7 @@ router.post("/connect", async (req, res) => {
       return;
     }
 
-    res.status(400).json({ success: false, message: "Token invalido ou bot inacessivel" });
+    res.status(400).json({ success: false, message: error instanceof Error ? error.message : "Token invalido ou bot inacessivel" });
   }
 });
 
@@ -194,7 +257,10 @@ router.post("/update-token", async (req, res) => {
 
     const discordUser = await validateBotToken(botToken);
     if (discordUser.id !== clientId) {
-      res.status(400).json({ success: false, message: "Token invalido ou bot inacessivel" });
+      res.status(400).json({
+        success: false,
+        message: `O token pertence ao bot ${discordUser.id}, mas o Client ID informado foi ${clientId}.`
+      });
       return;
     }
 
@@ -219,7 +285,7 @@ router.post("/update-token", async (req, res) => {
         botId: previousBotId,
         status: previousStatus
       });
-      res.status(400).json({ success: false, message: "Token invalido ou bot inacessivel" });
+      res.status(400).json({ success: false, message: inaccessibleBotMessage(existing.guildId) });
       return;
     }
 
@@ -228,8 +294,8 @@ router.post("/update-token", async (req, res) => {
       message: "Token atualizado com sucesso",
       bot: { clientId, guildId: existing.guildId, targetUserId: existing.targetUserId, status }
     });
-  } catch {
-    res.status(400).json({ success: false, message: "Token invalido ou bot inacessivel" });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error instanceof Error ? error.message : "Token invalido ou bot inacessivel" });
   }
 });
 

@@ -1,9 +1,9 @@
 # Bot Orvitek Hospedagem
 
-Bot Discord da Orvitek Hospedagem com `/painel` e `/panel` para registrar, ativar e remover bots de clientes pela API.
+Bot Discord da Orvitek Hospedagem com `/hospedagem` para cadastro e `/gerenciador` para abrir ferramentas de gerenciamento.
 
-O fluxo atual pede `Client ID`, `ID de Discord`, `ID do servidor dos comandos` e `FakeToken` em um modal privado do Discord, mostra uma confirmacao e so envia para a API depois que o usuario confirma.
-Antes de abrir o modal, o bot consulta os cadastros/liberacoes do Discord do usuario na API. Se existir bot pago/liberado, o usuario escolhe qual quer cadastrar e o formulario abre preenchido com o dono, Client ID e servidor dos comandos.
+O fluxo atual pede `Client ID`, `ID do servidor`, `Chave de acesso Orvitek` e `Token do bot` em um modal privado do Discord. O ID de Discord do dono e detectado automaticamente por quem clicou em **Cadastrar bot**.
+Antes de abrir o modal, o bot consulta os cadastros/liberacoes do Discord do usuario na API. Se existir bot pago/liberado, o usuario escolhe qual quer cadastrar e o formulario abre preenchido com Client ID, servidor e chave de acesso.
 
 ## Como usar
 
@@ -49,24 +49,24 @@ npm start
 
 Esse comando inicia a API e o bot do Discord juntos. Se quiser iniciar separado, use `npm run api:dev` para a API e `npm run bot:start` para o bot.
 
-Para registrar apenas os comandos `/painel` e `/panel` sem iniciar o bot:
+Para registrar apenas os comandos sem iniciar o bot:
 
 ```bash
 npm run register
 ```
 
-4. No Discord, use `/painel` ou `/panel` e escolha:
+4. No Discord, use `/hospedagem` e escolha:
 
-- **Register Bot**
-- **Delete Bot**: aparece somente para IDs configurados em `PANEL_ADMIN_IDS`
+- **Cadastrar bot**
 
-5. Em **Register Bot**, informe:
+5. Em **Cadastrar bot**, informe:
 
-- Client ID
-- ID de Discord
-- FakeToken
+- Application ID / Client ID
+- ID do servidor do cliente
+- Chave de acesso Orvitek
+- Token do bot
 
-Depois confirme em **Confirm Registration** ou volte em **Correct** para corrigir os dados. Na confirmacao, o bot envia os dados para a API e tenta ativar o bot.
+Depois informe o codigo de ativacao de 4 digitos, confirme em **Confirmar cadastro** ou volte em **Corrigir** para ajustar os dados. Na confirmacao, o bot envia os dados para a API e tenta ativar o bot.
 
 ## Onde os cadastros ficam
 
@@ -172,7 +172,6 @@ Rotas para o bot Orvitek:
 GET /api/hosting-plans
 GET /api/hosting-plans/overdue
 POST /api/hosting-plans/expire-overdue
-POST /api/hosting-plans/sync-hierarchy-commands
 POST /api/hosting-plans/sync-client
 POST /api/hosting-plans/:clientId/renew
 POST /api/hosting-plans/:clientId/suspend
@@ -443,6 +442,27 @@ Payload enviado:
 
 Se `ORVITEK_MAIN_BOT_NOTIFY_URL` estiver vazio, o cadastro funciona sem tentar avisar o bot principal.
 
+Para criar o codigo de ativacao de 4 digitos apos pagamento confirmado, o bot principal pode chamar:
+
+```http
+POST /api/orvitek/activation-code
+Authorization: Bearer ORVITEK_HOSTING_BOT_TOKEN
+Content-Type: application/json
+```
+
+Payload:
+
+```json
+{
+  "guildId": "ID_DO_SERVIDOR",
+  "token": "1234",
+  "userId": "DISCORD_ID_DO_USUARIO",
+  "createdBy": "orvitek-main-bot"
+}
+```
+
+A rota antiga `POST /api/orvitek/fivem-fac-token` continua funcionando como compatibilidade.
+
 `POST /api/user-bots/connect` recebe:
 
 ```json
@@ -450,11 +470,13 @@ Se `ORVITEK_MAIN_BOT_NOTIFY_URL` estiver vazio, o cadastro funciona sem tentar a
   "guildId": "ID_DO_SERVIDOR",
   "targetUserId": "DISCORD_ID_DO_USUARIO",
   "clientId": "CLIENT_ID_DO_BOT",
+  "hostingAccessKey": "CHAVE_LIBERADA_APOS_PAGAMENTO",
+  "activationCode": "1234",
   "botToken": "TOKEN_REAL_DO_BOT"
 }
 ```
 
-`guildId` e o ID do servidor onde o bot do cliente vai registrar e mostrar comandos como `/herarquia` e `/hierarquia`. No modal do `/hospedagem`, esse campo aparece como **ID do servidor dos comandos** e pode ser trocado antes de confirmar o cadastro.
+`guildId` e o ID do servidor onde o bot do cliente vai operar. No modal do `/hospedagem`, esse campo aparece como **ID do servidor** e pode ser trocado antes de confirmar o cadastro.
 
 Quando o usuario clica em **Cadastrar bot**, o bot do painel consulta `GET /api/user-bots` usando o Discord ID dele em `x-user-id`. Assim ele ve os bots ja liberados para o proprio cadastro antes de escolher qual token enviar.
 
@@ -470,44 +492,6 @@ Para alto volume, use MongoDB com replica set/cluster gerenciado, configure `MON
 
 Quando o bot do usuario fica online, ele passa a apagar novas mensagens enviadas por `targetUserId` no servidor `guildId`. Para isso, o bot conectado precisa estar no servidor e possuir a permissao **Manage Messages** no canal.
 
-## Sistema de hierarquia dos bots hospedados
-
-Todo bot de cliente que estiver cadastrado e online registra os comandos `/herarquia` e `/hierarquia` no servidor dele.
-Ao iniciar a API, a hospedagem tambem sincroniza esses comandos direto pela API do Discord para todos os bots cadastrados com token e plano ativo.
-
-Subcomandos disponiveis:
-
-```text
-/herarquia ver
-/herarquia nivel nome:<nome> cargo:<cargo>
-/herarquia remover-nivel nome:<nome>
-/herarquia aplicar usuario:<usuario> nivel:<nome>
-/herarquia autocargo acao:adicionar cargo:<cargo>
-/herarquia autocargo acao:remover cargo:<cargo>
-/herarquia resetar
-```
-
-Quem configura ou aplica cargos precisa ter **Gerenciar Cargos**. O bot hospedado tambem precisa ter permissao **Manage Roles** e o cargo do bot precisa ficar acima dos cargos que ele vai aplicar.
-
-Para os cargos automaticos funcionarem quando um membro entra no servidor, ative **Server Members Intent** no Discord Developer Portal do bot do cliente.
-
-Para forcar a sincronizacao dos comandos sem reiniciar:
-
-```http
-POST /api/hosting-plans/sync-hierarchy-commands
-x-orvitek-api-key: SUA_ORVITEK_API_KEY
-```
-
-Para sincronizar apenas um bot:
-
-```json
-{
-  "clientId": "CLIENT_ID_DO_BOT"
-}
-```
-
-O bot do cliente precisa ter sido convidado no servidor com o escopo `applications.commands`. Sem esse escopo, o Discord nao mostra comandos de barra mesmo quando a API registra corretamente.
-
 Para testar sem token real, use somente em desenvolvimento:
 
 ```env
@@ -517,37 +501,68 @@ NODE_ENV=development
 
 Depois clique em **Cadastrar mock** na tela. Isso cadastra um bot ficticio offline com token falso criptografado, sem passar pelo Discord e sem tentar iniciar bot real.
 
-`FakeToken` serve apenas para desenvolvimento/mock. Para ativar um bot real, a API precisa receber um token real de bot, porque o Discord valida o token e a conexao do gateway.
+`FakeToken` serve apenas para desenvolvimento/mock. Para ativar um bot real, a API precisa receber o token real do bot, porque o Discord valida o token e a conexao do gateway.
 
-## Fluxo pelo painel do Discord
+## Fluxo pelo Discord
 
-O `/painel` e o `/panel` abrem um painel com dois botoes:
+O `/hospedagem` abre o painel de cadastro:
 
-- **Register Bot**: pede `Client ID`, `ID de Discord` e `FakeToken`, mostra uma tela de confirmacao com **Confirm Registration** e **Correct**, e so envia para a API depois da confirmacao.
-- **Delete Bot**: aparece somente para administradores configurados em `PANEL_ADMIN_IDS`, pede `Client ID` e `ID de Discord`, mostra uma tela de confirmacao e remove/desliga o bot pela API.
+- **Cadastrar bot**: pede `Client ID`, `ID do servidor`, `Chave de acesso Orvitek` e `Token do bot`, depois pede o codigo de ativacao de 4 digitos, mostra uma tela de confirmacao com **Confirmar cadastro** e **Corrigir**, e so envia para a API depois da confirmacao.
 
-## Painel gerenciador
+## Painel gerenciador FiveM
 
-Administradores configurados em `PANEL_ADMIN_IDS` podem usar:
+Usuarios podem usar:
 
 ```text
-/painel-gerenciador
-/gerenciar
-/gerenciar usuario:@usuario
+/gerenciador
 ```
 
-`/painel-gerenciador` abre um painel com:
+`/gerenciador` abre o painel de ferramentas. No fluxo atual, ele mostra **fac FiveM**.
 
-- **Ver cadastrados**: mostra quem cadastrou cada bot, client ID, servidor, status online/offline e situacao do plano.
-- **Registrar hierarquia**: sincroniza `/herarquia` e `/hierarquia` em todos os bots cadastrados com token e plano ativo.
+Se o usuario ja tiver acesso liberado por token naquele servidor, o comando abre direto o painel **fac FiveM**. Caso contrario, ele informa o codigo de 4 digitos gerado quando comprou e ativou o bot no painel de hospedagem.
 
-`/gerenciar` mostra diretamente a lista de bots cadastrados. Cada bot aparece com o dono (`userId`) porque cada bot hospedado pertence a uma pessoa diferente.
+Depois que o codigo e aceito, o painel mostra **Ativar**. Ao clicar, o usuario escolhe o canal de texto onde o **Painel fac** deve aparecer. O bot salva os dados do Discord do usuario, o servidor, o canal escolhido e a mensagem enviada, mantendo o painel fixo naquele canal.
 
-Para o painel gerenciador funcionar, o bot do painel tambem precisa ter `ORVITEK_API_KEY` no `.env`, a mesma chave usada nas rotas `/api/hosting-plans`.
+No **Painel fac**, o usuario seleciona qual ferramenta quer usar. A ferramenta **Boas vindas** permite:
 
-O ID do servidor dos comandos pode ser informado no modal de cadastro. O backend valida, criptografa e liga o bot quando recebe a confirmacao.
+- escolher o canal de entrada;
+- escolher o canal de saida;
+- configurar um banner de boas vindas enviando uma imagem como anexo no Discord;
+- enviar boas vindas na DM quando alguem entrar no servidor;
+- avisar no canal de entrada quando alguem entrar;
+- avisar no canal de saida quando alguem sair.
 
-Em producao, o campo `FakeToken` precisa conter um token real de bot para o Discord aceitar a conexao. Tokens falsos servem apenas para o fluxo mock de desenvolvimento e nao ativam um bot real.
+O **Painel fac** tambem tem a ferramenta **Hierarquia**. Ela comeca com os niveis:
+
+- Lider;
+- Gerente;
+- Gerente de Acao.
+
+O usuario pode adicionar outros niveis, e cada nivel precisa ter um cargo selecionado. O sistema publica um painel de hierarquia em um canal de texto escolhido e lista automaticamente os membros que possuem cada cargo. Se a pessoa tiver mais de um cargo configurado, ela aparece no primeiro nivel correspondente da ordem da hierarquia. Quando alguem recebe ou perde um cargo configurado, o painel e atualizado para mostrar a hierarquia correta daquele servidor.
+
+Para detectar entrada/saida de membros e atualizar a hierarquia automaticamente por mudanca de cargo, ative **Server Members Intent** no Discord Developer Portal do bot do painel e configure:
+
+```env
+ENABLE_MEMBER_EVENTS=true
+```
+
+Se esse intent nao estiver ativo no Developer Portal, deixe `ENABLE_MEMBER_EVENTS=false` para o bot iniciar sem erro.
+
+Cada servidor Discord tem seus proprios tokens, acessos e configuracoes.
+
+## Ativacao no bot hospedado
+
+Quando o bot do cliente estiver hospedado e online, ele registra `/ativar` no servidor dele enquanto o Painel fac ainda nao foi liberado.
+
+O usuario que hospedou o bot usa `/ativar`, informa o codigo de 4 digitos recebido apos o pagamento no primeiro bot, e a hospedagem valida esse codigo no servidor atual. Se o codigo estiver disponivel, ele e marcado como usado, o acesso ao Painel fac e liberado para aquele usuario naquele servidor, `/ativar` e removido e `/painel-fac` e registrado.
+
+O comando `/painel-fac` fica visivel no bot hospedado, mas so o usuario que hospedou aquele bot consegue usar.
+
+No cadastro pelo `/hospedagem`, o codigo de ativacao de 4 digitos e obrigatorio. A API consome esse codigo durante `POST /api/user-bots/connect`, antes de ligar o bot hospedado. Assim o bot do cliente ja sobe com o acesso inicial liberado.
+
+O ID do servidor pode ser informado no modal de cadastro. O backend valida, criptografa e liga o bot quando recebe a confirmacao.
+
+Em producao, o campo `Token do bot` precisa conter um token real de bot para o Discord aceitar a conexao. Tokens falsos servem apenas para o fluxo mock de desenvolvimento e nao ativam um bot real.
 
 Em producao, `API_PUBLIC_URL` deve ser uma URL HTTPS publica, por exemplo:
 

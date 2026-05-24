@@ -18,9 +18,6 @@ const renewSchema = zod_1.z.object({
     days: zod_1.z.number().int().positive().max(365).optional(),
     amountCents: zod_1.z.number().int().positive().optional()
 });
-const syncCommandsSchema = zod_1.z.object({
-    clientId: zod_1.z.string().trim().optional()
-});
 const syncSchema = zod_1.z.object({
     userId: zod_1.z.string().trim(),
     guildId: zod_1.z.string().trim(),
@@ -114,37 +111,6 @@ router.post("/expire-overdue", async (_req, res) => {
         plans: expired
     });
 });
-router.post("/sync-hierarchy-commands", async (req, res) => {
-    const parsed = syncCommandsSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-        res.status(400).json({ success: false, message: "Dados invalidos" });
-        return;
-    }
-    const { clientId } = parsed.data;
-    if (clientId) {
-        try {
-            (0, config_1.assertSnowflake)(clientId, "clientId");
-        }
-        catch {
-            res.status(400).json({ success: false, message: "Client ID invalido" });
-            return;
-        }
-        const result = await BotManager_1.botManager.syncHierarchyCommandsByClientId(clientId);
-        res.status(result.ok ? 200 : 400).json({
-            success: result.ok,
-            message: result.message,
-            result
-        });
-        return;
-    }
-    const results = await BotManager_1.botManager.syncHierarchyCommandsForRegisteredBots();
-    const synced = results.filter((result) => result.ok).length;
-    res.json({
-        success: true,
-        message: `${synced}/${results.length} bot(s) com /herarquia sincronizado(s)`,
-        results
-    });
-});
 router.post("/sync-client", async (req, res) => {
     const parsed = syncSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -204,7 +170,6 @@ router.post("/sync-client", async (req, res) => {
         }
         else {
             botStatus = await BotManager_1.botManager.restartBot(userId, clientId);
-            await BotManager_1.botManager.syncHierarchyCommandsForBot(saved);
         }
         if (!existing) {
             (0, OrvitekMainBotNotifier_1.notifyMainBotBotRegistered)(saved, botStatus);
@@ -251,7 +216,6 @@ router.post("/:clientId/renew", async (req, res) => {
         lastPaymentAt: now.toISOString()
     });
     const status = await BotManager_1.botManager.startBot(existing.userId, clientId);
-    await BotManager_1.botManager.syncHierarchyCommandsByClientId(clientId);
     res.json({
         success: true,
         message: `Plano renovado por ${parsed.data.days || defaultPlanDays} dias`,

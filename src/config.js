@@ -50,6 +50,7 @@ function getConfig() {
     panelClientId,
     guildId,
     panelAdminIds: parseAdminIds(process.env.PANEL_ADMIN_IDS),
+    enableMemberEvents: process.env.ENABLE_MEMBER_EVENTS === "true",
     apiPublicUrl: process.env.API_PUBLIC_URL || `http://localhost:${process.env.API_PORT || 3000}`,
     orvitekApiKey: process.env.ORVITEK_API_KEY || "",
     testOwnerId: process.env.TEST_OWNER_ID || null,

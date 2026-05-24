@@ -16,10 +16,6 @@ const renewSchema = z.object({
   amountCents: z.number().int().positive().optional()
 });
 
-const syncCommandsSchema = z.object({
-  clientId: z.string().trim().optional()
-});
-
 const syncSchema = z.object({
   userId: z.string().trim(),
   guildId: z.string().trim(),
@@ -129,43 +125,6 @@ router.post("/expire-overdue", async (_req, res) => {
   });
 });
 
-router.post("/sync-hierarchy-commands", async (req, res) => {
-  const parsed = syncCommandsSchema.safeParse(req.body || {});
-
-  if (!parsed.success) {
-    res.status(400).json({ success: false, message: "Dados invalidos" });
-    return;
-  }
-
-  const { clientId } = parsed.data;
-
-  if (clientId) {
-    try {
-      assertSnowflake(clientId, "clientId");
-    } catch {
-      res.status(400).json({ success: false, message: "Client ID invalido" });
-      return;
-    }
-
-    const result = await botManager.syncHierarchyCommandsByClientId(clientId);
-    res.status(result.ok ? 200 : 400).json({
-      success: result.ok,
-      message: result.message,
-      result
-    });
-    return;
-  }
-
-  const results = await botManager.syncHierarchyCommandsForRegisteredBots();
-  const synced = results.filter((result) => result.ok).length;
-
-  res.json({
-    success: true,
-    message: `${synced}/${results.length} bot(s) com /herarquia sincronizado(s)`,
-    results
-  });
-});
-
 router.post("/sync-client", async (req, res) => {
   const parsed = syncSchema.safeParse(req.body || {});
 
@@ -245,7 +204,6 @@ router.post("/sync-client", async (req, res) => {
       botStatus = "offline";
     } else {
       botStatus = await botManager.restartBot(userId, clientId);
-      await botManager.syncHierarchyCommandsForBot(saved);
     }
 
     if (!existing) {
@@ -299,7 +257,6 @@ router.post("/:clientId/renew", async (req, res) => {
   });
 
   const status = await botManager.startBot(existing.userId, clientId);
-  await botManager.syncHierarchyCommandsByClientId(clientId);
 
   res.json({
     success: true,

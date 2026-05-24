@@ -11,6 +11,9 @@ function debug(message) {
         console.log(`[hosting-permission] ${message}`);
     }
 }
+function log(message) {
+    console.log(`[hosting-permission] ${message}`);
+}
 function getPermissionsCollection() {
     if (!mongoose_1.default.connection.db) {
         throw new Error("MongoDB nao esta conectado para consultar permissoes de hospedagem.");
@@ -22,6 +25,12 @@ async function checkHostingRegistrationPermission(accessKey) {
     const permission = await getPermissionsCollection().findOne({ accessKey });
     const allowed = Boolean(permission?.allowed === true && permission.status === "paid");
     debug(`permissao encontrada=${Boolean(permission)} allowed=${permission?.allowed ?? "n/a"} status=${permission?.status ?? "n/a"} resultado=${allowed}`);
+    if (!permission) {
+        log(`accessKey nao encontrada: ${accessKey}`);
+    }
+    else if (!allowed) {
+        log(`accessKey existe mas nao libera: ${accessKey} allowed=${permission.allowed} status=${permission.status}`);
+    }
     return {
         allowed,
         found: Boolean(permission),

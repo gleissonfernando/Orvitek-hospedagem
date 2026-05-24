@@ -87,6 +87,16 @@
       </label>
 
       <label>
+        Chave de acesso Orvitek
+        <input id="hosting-access-key" autocomplete="off" required />
+      </label>
+
+      <label>
+        Codigo de ativacao
+        <input id="fivem-fac-token" autocomplete="off" inputmode="numeric" maxlength="4" pattern="\\d{4}" required />
+      </label>
+
+      <label>
         Token do bot
         <input id="bot-token" autocomplete="off" type="password" required />
       </label>
@@ -120,6 +130,8 @@
       const guildIdInput = document.querySelector("#guild-id");
       const targetUserIdInput = document.querySelector("#target-user-id");
       const clientIdInput = document.querySelector("#client-id");
+      const hostingAccessKeyInput = document.querySelector("#hosting-access-key");
+      const fivemFacTokenInput = document.querySelector("#fivem-fac-token");
       const message = document.querySelector("#message");
       const botsBody = document.querySelector("#bots");
       const params = new URLSearchParams(window.location.search);
@@ -128,6 +140,8 @@
       guildIdInput.value = params.get("guildId") || "";
       targetUserIdInput.value = params.get("targetUserId") || params.get("discordId") || userIdInput.value;
       clientIdInput.value = params.get("clientId") || "";
+      hostingAccessKeyInput.value = params.get("hostingAccessKey") || params.get("accessKey") || "";
+      fivemFacTokenInput.value = params.get("fivemFacToken") || "";
 
       function headers() {
         return {
@@ -194,6 +208,9 @@
             guildId: document.querySelector("#guild-id").value.trim(),
             targetUserId: targetUserIdInput.value.trim(),
             clientId: clientIdInput.value.trim(),
+            hostingAccessKey: hostingAccessKeyInput.value.trim(),
+            fivemFacToken: fivemFacTokenInput.value.trim(),
+            activationCode: fivemFacTokenInput.value.trim(),
             botToken: botTokenInput.value
           })
         });

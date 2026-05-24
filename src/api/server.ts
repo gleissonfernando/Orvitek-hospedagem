@@ -57,17 +57,6 @@ async function main(): Promise<void> {
     console.error("Failed to restore user bots:", error.message);
   });
 
-  botManager.syncHierarchyCommandsForRegisteredBots()
-    .then((results) => {
-      const synced = results.filter((result) => result.ok).length;
-      if (results.length > 0) {
-        console.log(`${synced}/${results.length} bot(s) com /herarquia sincronizado(s).`);
-      }
-    })
-    .catch((error) => {
-      console.error("Failed to sync hierarchy commands:", error.message);
-    });
-
   setInterval(() => {
     expireOverdueBots()
       .then((expired) => {

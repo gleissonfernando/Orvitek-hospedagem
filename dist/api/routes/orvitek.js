@@ -66,8 +66,9 @@ router.post("/desligar", async (req, res) => {
         res.status(500).json(body);
     }
 });
-router.post("/fivem-fac-token", async (req, res) => {
+async function handleActivationCodeCreate(req, res) {
     if (!isAuthorized(req.header("authorization"))) {
+        console.log("[orvitek/activation-code] nao autorizado");
         res.status(401).json({
             ok: false,
             message: "Nao autorizado"
@@ -77,10 +78,18 @@ router.post("/fivem-fac-token", async (req, res) => {
     const guildId = String(req.body?.guildId || "").trim();
     const token = String(req.body?.token || "").trim();
     const createdBy = String(req.body?.createdBy || "orvitek-main-bot").trim();
+    const userId = String(req.body?.userId || "").trim();
     if (!/^\d{17,20}$/.test(guildId)) {
         res.status(400).json({
             ok: false,
             message: "guildId invalido"
+        });
+        return;
+    }
+    if (userId && !/^\d{17,20}$/.test(userId)) {
+        res.status(400).json({
+            ok: false,
+            message: "userId invalido"
         });
         return;
     }
@@ -92,7 +101,8 @@ router.post("/fivem-fac-token", async (req, res) => {
         return;
     }
     try {
-        const record = (0, FiveMFacTokenStore_1.createFiveMFacToken)({ guildId, token, createdBy });
+        const record = (0, FiveMFacTokenStore_1.createFiveMFacToken)({ guildId, token, createdBy, userId: userId || null });
+        console.log(`[orvitek/activation-code] codigo criado como available guildId=${guildId} userId=${userId || "n/a"} createdBy=${createdBy} code=${token}`);
         res.json({
             ok: true,
             token,
@@ -101,9 +111,12 @@ router.post("/fivem-fac-token", async (req, res) => {
         });
     }
     catch (error) {
+        console.log(`[orvitek/activation-code] falha ao criar codigo guildId=${guildId} userId=${userId || "n/a"} code=${token} error=${error instanceof Error ? error.message : "erro desconhecido"}`);
         res.status(409).json({
             ok: false,
             message: error instanceof Error ? error.message : "Nao foi possivel registrar o token"
         });
     }
-});
+}
+router.post("/activation-code", handleActivationCodeCreate);
+router.post("/fivem-fac-token", handleActivationCodeCreate);
