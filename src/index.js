@@ -221,35 +221,6 @@ function hasFiveMFacAccess(guildId, userId) {
   return guildStore.users[userId]?.access === true;
 }
 
-function generateFiveMFacToken(guildId, createdBy) {
-  const store = readFiveMFacStore();
-  const guildStore = getFiveMGuildStore(store, guildId);
-  let token = null;
-
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const candidate = String(Math.floor(1000 + Math.random() * 9000));
-    if (!guildStore.tokens[candidate] || guildStore.tokens[candidate].status === "used") {
-      token = candidate;
-      break;
-    }
-  }
-
-  if (!token) {
-    throw new Error("Nao foi possivel gerar um token disponivel para este servidor.");
-  }
-
-  guildStore.tokens[token] = {
-    status: "available",
-    createdBy,
-    createdAt: new Date().toISOString(),
-    usedBy: null,
-    usedAt: null
-  };
-
-  writeJsonFile(fivemFacPath, store);
-  return token;
-}
-
 function activateFiveMFacToken(guildId, userId, token) {
   const store = readFiveMFacStore();
   const guildStore = getFiveMGuildStore(store, guildId);
@@ -517,7 +488,7 @@ function buildManagementToolsPanel() {
   ], row);
 }
 
-function buildFiveMFacAccessPanel(isAdmin = false) {
+function buildFiveMFacAccessPanel() {
   const accessRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("fivem-fac:buy-token")
@@ -529,24 +500,14 @@ function buildFiveMFacAccessPanel(isAdmin = false) {
       .setStyle(ButtonStyle.Primary)
   );
 
-  const rows = [accessRow];
-
-  if (isAdmin) {
-    rows.push(new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("fivem-fac:generate-token")
-        .setLabel("Gerar token")
-        .setStyle(ButtonStyle.Secondary)
-    ));
-  }
-
   return buildV2Panel([
     "## fac FiveM",
     "Essa ferramenta precisa de um token de acesso de 4 digitos.",
     "",
+    "O token e fornecido pelo primeiro bot apos a compra.",
     "Cada servidor Discord tem seus proprios tokens, acessos e configuracoes.",
     "Usar um token aqui libera somente o painel fac FiveM para voce neste servidor."
-  ], rows);
+  ], accessRow);
 }
 
 function buildFiveMFacPanel(guildId, userId) {
@@ -747,37 +708,12 @@ async function handleFiveMFacEntry(interaction) {
     return;
   }
 
-  await interaction.update(buildFiveMFacAccessPanel(isPanelAdmin(interaction.user.id)));
+  await interaction.update(buildFiveMFacAccessPanel());
 }
 
 async function handleFiveMFacBuyToken(interaction) {
   await interaction.reply({
-    content: "Para comprar um token fac FiveM, chame a equipe Orvitek. Depois use o botao Usar token e digite os 4 digitos recebidos.",
-    flags: MessageFlags.Ephemeral
-  });
-}
-
-async function handleFiveMFacGenerateToken(interaction) {
-  if (!interaction.guildId) {
-    await interaction.reply({ content: "Use essa ferramenta dentro de um servidor.", flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  if (!isPanelAdmin(interaction.user.id)) {
-    await interaction.reply({ content: "Apenas administradores podem gerar tokens.", flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  let token;
-  try {
-    token = generateFiveMFacToken(interaction.guildId, interaction.user.id);
-  } catch (error) {
-    await interaction.reply({ content: error.message, flags: MessageFlags.Ephemeral });
-    return;
-  }
-
-  await interaction.reply({
-    content: `Token fac FiveM gerado para este servidor: ${token}\nEnvie esse token somente para o cliente que comprou o acesso.`,
+    content: "Compre o acesso pelo primeiro bot. Ele vai fornecer um token de 4 digitos. Depois volte aqui, clique em Usar token e digite o codigo recebido.",
     flags: MessageFlags.Ephemeral
   });
 }
@@ -1288,11 +1224,6 @@ panelClient.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.isButton() && interaction.customId === "fivem-fac:use-token") {
     await interaction.showModal(buildFiveMTokenModal());
-    return;
-  }
-
-  if (interaction.isButton() && interaction.customId === "fivem-fac:generate-token") {
-    await handleFiveMFacGenerateToken(interaction);
     return;
   }
 

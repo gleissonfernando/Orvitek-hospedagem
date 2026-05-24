@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { apiConfig } from "../config";
+import { createFiveMFacToken } from "../services/FiveMFacTokenStore";
 import { shutdownHostingFromPayload } from "../services/HostingShutdownProcessor";
 
 const router = Router();
@@ -68,6 +69,51 @@ router.post("/desligar", async (req, res) => {
     };
     debug(`resposta enviada=${JSON.stringify(body)}`);
     res.status(500).json(body);
+  }
+});
+
+router.post("/fivem-fac-token", async (req, res) => {
+  if (!isAuthorized(req.header("authorization"))) {
+    res.status(401).json({
+      ok: false,
+      message: "Nao autorizado"
+    });
+    return;
+  }
+
+  const guildId = String(req.body?.guildId || "").trim();
+  const token = String(req.body?.token || "").trim();
+  const createdBy = String(req.body?.createdBy || "orvitek-main-bot").trim();
+
+  if (!/^\d{17,20}$/.test(guildId)) {
+    res.status(400).json({
+      ok: false,
+      message: "guildId invalido"
+    });
+    return;
+  }
+
+  if (!/^\d{4}$/.test(token)) {
+    res.status(400).json({
+      ok: false,
+      message: "token precisa ter exatamente 4 digitos"
+    });
+    return;
+  }
+
+  try {
+    const record = createFiveMFacToken({ guildId, token, createdBy });
+    res.json({
+      ok: true,
+      token,
+      status: record.status,
+      guildId
+    });
+  } catch (error) {
+    res.status(409).json({
+      ok: false,
+      message: error instanceof Error ? error.message : "Nao foi possivel registrar o token"
+    });
   }
 });
 
