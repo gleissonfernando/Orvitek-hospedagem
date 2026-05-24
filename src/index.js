@@ -247,6 +247,21 @@ function activateFiveMFacToken(guildId, userId, token) {
   return { ok: true };
 }
 
+function checkFiveMFacTokenAvailable(guildId, token) {
+  const store = readFiveMFacStore();
+  const guildStore = getFiveMGuildStore(store, guildId);
+  const tokenData = guildStore.tokens[token];
+
+  if (!tokenData || tokenData.status !== "available") {
+    return {
+      ok: false,
+      message: "Codigo FiveM invalido ou ja utilizado para este servidor."
+    };
+  }
+
+  return { ok: true };
+}
+
 function saveRegistration(discordUserId, registration) {
   const registry = readRegistry();
   registry[discordUserId] = {
@@ -815,6 +830,10 @@ function buildRegisterModal(previous = {}, currentGuildId = null) {
 function buildRegisterConfirmPanel(registration) {
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
+      .setCustomId("bot:register-fivem-code")
+      .setLabel(registration.fivemFacToken ? "Trocar codigo FiveM" : "Informar codigo FiveM")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId("bot:register-correct")
       .setLabel("Correct")
       .setStyle(ButtonStyle.Secondary),
@@ -822,6 +841,7 @@ function buildRegisterConfirmPanel(registration) {
       .setCustomId("bot:register-confirm")
       .setLabel("Confirm Registration")
       .setStyle(ButtonStyle.Success)
+      .setDisabled(!registration.fivemFacToken)
   );
 
   return buildV2Panel([
@@ -830,8 +850,27 @@ function buildRegisterConfirmPanel(registration) {
     `Client ID: ${registration.clientId}`,
     `Servidor dos comandos: ${registration.serverId}`,
     `Chave Orvitek: ${registration.hostingAccessKey}`,
+    `Codigo FiveM: ${registration.fivemFacToken ? "validado" : "pendente"}`,
     `FakeToken: ${maskToken(registration.botToken)}`
   ], row);
+}
+
+function buildRegisterFiveMCodeModal() {
+  const codeInput = new TextInputBuilder()
+    .setCustomId("fivemFacToken")
+    .setLabel("Codigo FiveM")
+    .setPlaceholder("Digite o codigo de 4 digitos")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMinLength(4)
+    .setMaxLength(4);
+
+  return new ModalBuilder()
+    .setCustomId("modal:bot-register-fivem-code")
+    .setTitle("Codigo fac FiveM")
+    .addComponents(
+      new ActionRowBuilder().addComponents(codeInput)
+    );
 }
 
 function botCanBeRegistered(bot) {
@@ -1026,16 +1065,56 @@ async function handleRegisterSubmit(interaction) {
     return;
   }
 
+  const previousRegistration = pendingBotRegistrations.get(interaction.user.id);
+  const previousFiveMToken = previousRegistration?.serverId === serverId.value
+    ? previousRegistration.fivemFacToken
+    : null;
+
   const registration = {
     serverId: serverId.value,
     ownerId: ownerId.value,
     clientId: clientId.value,
     hostingAccessKey,
-    botToken
+    botToken,
+    fivemFacToken: previousFiveMToken
   };
 
   pendingBotRegistrations.set(interaction.user.id, registration);
   await interaction.reply(buildRegisterConfirmPanel(registration));
+}
+
+async function handleRegisterFiveMCodeSubmit(interaction) {
+  const registration = pendingBotRegistrations.get(interaction.user.id);
+
+  if (!registration) {
+    await interaction.reply({
+      content: "Nenhum cadastro pendente. Clique em Register Bot para comecar novamente.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const fivemFacToken = interaction.fields.getTextInputValue("fivemFacToken").trim();
+
+  if (!/^\d{4}$/.test(fivemFacToken)) {
+    await interaction.reply({ content: "O codigo FiveM precisa ter exatamente 4 digitos.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const tokenStatus = checkFiveMFacTokenAvailable(registration.serverId, fivemFacToken);
+
+  if (!tokenStatus.ok) {
+    await interaction.reply({ content: tokenStatus.message, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const updatedRegistration = {
+    ...registration,
+    fivemFacToken
+  };
+
+  pendingBotRegistrations.set(interaction.user.id, updatedRegistration);
+  await interaction.reply(buildRegisterConfirmPanel(updatedRegistration));
 }
 
 async function handleRegisterConfirm(interaction) {
@@ -1049,7 +1128,22 @@ async function handleRegisterConfirm(interaction) {
     return;
   }
 
+  if (!registration.fivemFacToken) {
+    await interaction.reply({
+      content: "Informe o codigo FiveM de 4 digitos antes de confirmar o cadastro.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  const tokenStatus = checkFiveMFacTokenAvailable(registration.serverId, registration.fivemFacToken);
+
+  if (!tokenStatus.ok) {
+    await interaction.editReply(tokenStatus.message);
+    return;
+  }
 
   let result;
   try {
@@ -1078,13 +1172,20 @@ async function handleRegisterConfirm(interaction) {
     return;
   }
 
+  const fivemActivation = activateFiveMFacToken(registration.serverId, registration.ownerId, registration.fivemFacToken);
+
+  if (!fivemActivation.ok) {
+    await interaction.editReply(`Bot registrado e ativado, mas o painel FiveM nao foi liberado: ${fivemActivation.message}`);
+    return;
+  }
+
   saveRegistration(interaction.user.id, {
     serverId: registration.serverId,
     ownerId: registration.ownerId,
     clientId: registration.clientId
   });
   pendingBotRegistrations.delete(interaction.user.id);
-  await interaction.editReply("Bot registrado e ativado com sucesso.");
+  await interaction.editReply("Bot registrado e ativado com sucesso. Painel fac FiveM liberado no servidor configurado.");
 }
 
 async function handleDeleteSubmit(interaction) {
@@ -1252,6 +1353,19 @@ panelClient.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.isButton() && interaction.customId === "bot:register-fivem-code") {
+    if (!pendingBotRegistrations.has(interaction.user.id)) {
+      await interaction.reply({
+        content: "Nenhum cadastro pendente. Clique em Register Bot para comecar novamente.",
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    await interaction.showModal(buildRegisterFiveMCodeModal());
+    return;
+  }
+
   if (interaction.isButton() && interaction.customId === "bot:register-confirm") {
     await handleRegisterConfirm(interaction);
     return;
@@ -1289,6 +1403,11 @@ panelClient.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.type === InteractionType.ModalSubmit && interaction.customId === "modal:bot-register") {
     await handleRegisterSubmit(interaction);
+    return;
+  }
+
+  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === "modal:bot-register-fivem-code") {
+    await handleRegisterFiveMCodeSubmit(interaction);
     return;
   }
 
