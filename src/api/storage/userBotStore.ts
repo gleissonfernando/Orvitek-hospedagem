@@ -99,7 +99,7 @@ export async function upsertUserBot(input: Omit<LocalUserBot, "createdAt" | "upd
     const updated = await UserBot.findOneAndUpdate(
       { userId: input.userId, clientId: input.clientId },
       { $set: normalizeForMongo(input) },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: "after", upsert: true, setDefaultsOnInsert: true }
     ).select("+encryptedToken").lean();
 
     if (!updated) {
@@ -222,7 +222,7 @@ export async function updateUserBot(
     const updated = await UserBot.findOneAndUpdate(
       { userId, clientId },
       { $set: normalizeForMongo(patch) },
-      { new: true }
+      { returnDocument: "after" }
     ).select("+encryptedToken").lean();
 
     return updated ? toLocalUserBot(updated) : null;

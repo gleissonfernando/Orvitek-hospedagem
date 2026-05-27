@@ -2,8 +2,13 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+  delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+}
+
 const snowflakeRegex = /^\d{17,20}$/;
-const defaultApiUrl = `http://localhost:${process.env.API_PORT || 3000}`;
+const apiPort = process.env.PORT || process.env.API_PORT || 3000;
+const defaultApiUrl = `http://localhost:${apiPort}`;
 const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 
 function requireEnv(name: string): string {
@@ -52,7 +57,7 @@ const publicApiUrl = trimTrailingSlash(optionalEnv("API_PUBLIC_URL") || optional
 const hostingBotApiUrl = trimTrailingSlash(optionalEnv("HOSTING_BOT_API_URL") || publicApiUrl);
 
 export const apiConfig = {
-  port: Number(process.env.API_PORT || 3000),
+  port: Number(apiPort),
   mongoUri: process.env.MONGODB_URI || "",
   mongoDbName: process.env.MONGODB_DB_NAME || "orvitek",
   hostingEventsCollection: process.env.MONGODB_HOSTING_EVENTS_COLLECTION || "hosting_shutdown_events",

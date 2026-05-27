@@ -4,10 +4,15 @@ const path = require("node:path");
 const children = [];
 const tsxCli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
 
+const childEnv = { ...process.env };
+if (childEnv.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+  delete childEnv.NODE_TLS_REJECT_UNAUTHORIZED;
+}
+
 function start(name, command, args) {
   const child = spawn(command, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: childEnv,
     stdio: "inherit"
   });
 

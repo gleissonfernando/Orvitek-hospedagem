@@ -79,7 +79,7 @@ async function writeAll(bots) {
 }
 async function upsertUserBot(input) {
     if (usesMongo()) {
-        const updated = await UserBot_1.UserBot.findOneAndUpdate({ userId: input.userId, clientId: input.clientId }, { $set: normalizeForMongo(input) }, { new: true, upsert: true, setDefaultsOnInsert: true }).select("+encryptedToken").lean();
+        const updated = await UserBot_1.UserBot.findOneAndUpdate({ userId: input.userId, clientId: input.clientId }, { $set: normalizeForMongo(input) }, { returnDocument: "after", upsert: true, setDefaultsOnInsert: true }).select("+encryptedToken").lean();
         if (!updated) {
             throw new Error("Nao foi possivel salvar o bot do usuario.");
         }
@@ -173,7 +173,7 @@ async function deleteUserBot(userId, clientId) {
 }
 async function updateUserBot(userId, clientId, patch) {
     if (usesMongo()) {
-        const updated = await UserBot_1.UserBot.findOneAndUpdate({ userId, clientId }, { $set: normalizeForMongo(patch) }, { new: true }).select("+encryptedToken").lean();
+        const updated = await UserBot_1.UserBot.findOneAndUpdate({ userId, clientId }, { $set: normalizeForMongo(patch) }, { returnDocument: "after" }).select("+encryptedToken").lean();
         return updated ? toLocalUserBot(updated) : null;
     }
     const existing = await findUserBot(userId, clientId);
