@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.FiveMFacTokenConflictError = void 0;
 exports.createFiveMFacToken = createFiveMFacToken;
 exports.hasFiveMFacAccess = hasFiveMFacAccess;
 exports.checkFiveMFacToken = checkFiveMFacToken;
@@ -16,6 +17,13 @@ exports.saveFiveMHierarchyConfig = saveFiveMHierarchyConfig;
 exports.upsertFiveMHierarchyLevel = upsertFiveMHierarchyLevel;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
+class FiveMFacTokenConflictError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "FiveMFacTokenConflictError";
+    }
+}
+exports.FiveMFacTokenConflictError = FiveMFacTokenConflictError;
 const dataDir = node_path_1.default.join(process.cwd(), "data");
 const fivemFacPath = node_path_1.default.join(dataDir, "fivem-fac.json");
 function ensureDataDir() {
@@ -150,8 +158,15 @@ function createFiveMFacToken(input) {
     const store = readStore();
     const guildStore = getGuildStore(store, input.guildId);
     const existing = guildStore.tokens[input.token];
-    if (existing?.status === "available") {
-        throw new Error("Token ja existe e ainda nao foi utilizado neste servidor.");
+    if (existing) {
+        const sameOwner = (existing.createdForUserId || null) === (input.userId || null);
+        const sameCreator = existing.createdBy === input.createdBy;
+        if (existing.status === "available" && sameOwner && sameCreator) {
+            return { record: existing, created: false };
+        }
+        throw new FiveMFacTokenConflictError(existing.status === "used"
+            ? "Token ja foi utilizado neste servidor."
+            : "Token ja existe e esta associado a outro cliente neste servidor.");
     }
     const record = {
         status: "available",
@@ -163,7 +178,7 @@ function createFiveMFacToken(input) {
     };
     guildStore.tokens[input.token] = record;
     writeStore(store);
-    return record;
+    return { record, created: true };
 }
 function hasFiveMFacAccess(guildId, userId) {
     const store = readStore();

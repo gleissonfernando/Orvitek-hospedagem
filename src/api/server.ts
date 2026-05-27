@@ -2,7 +2,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import path from "node:path";
-import { apiConfig } from "./config";
+import { apiConfig, getApiIntegrationStatus, logApiIntegrationStatus } from "./config";
 import { connectMongo, isMongoConnected } from "./db";
 import { devMockBotsRouter } from "./routes/devMockBots";
 import { expireOverdueBots, hostingPlansRouter } from "./routes/hostingPlans";
@@ -26,7 +26,8 @@ async function main(): Promise<void> {
       ok: true,
       ready,
       storage: isMongoConnected() ? "mongodb" : "local-json",
-      mongoConnected: isMongoConnected()
+      mongoConnected: isMongoConnected(),
+      integrations: getApiIntegrationStatus()
     });
   });
 
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
   const server = app.listen(apiConfig.port, () => {
     ready = true;
     console.log(`API listening on port ${apiConfig.port}`);
+    logApiIntegrationStatus();
   });
 
   botManager.restoreOnlineBots().catch((error) => {
@@ -79,7 +81,7 @@ async function main(): Promise<void> {
     processPendingHostingShutdownEvents()
       .then((count) => {
         if (count > 0) {
-          console.log(`${count} evento(s) de desligamento da Orvitek processado(s).`);
+          console.log(`${count} evento(s) internos da Orvitek processado(s).`);
         }
       })
       .catch((error) => {

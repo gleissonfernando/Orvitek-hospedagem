@@ -28,7 +28,8 @@ async function main() {
             ok: true,
             ready,
             storage: (0, db_1.isMongoConnected)() ? "mongodb" : "local-json",
-            mongoConnected: (0, db_1.isMongoConnected)()
+            mongoConnected: (0, db_1.isMongoConnected)(),
+            integrations: (0, config_1.getApiIntegrationStatus)()
         });
     });
     app.use("/api/user-bots", userBots_1.userBotsRouter);
@@ -51,6 +52,7 @@ async function main() {
     const server = app.listen(config_1.apiConfig.port, () => {
         ready = true;
         console.log(`API listening on port ${config_1.apiConfig.port}`);
+        (0, config_1.logApiIntegrationStatus)();
     });
     BotManager_1.botManager.restoreOnlineBots().catch((error) => {
         console.error("Failed to restore user bots:", error.message);
@@ -75,7 +77,7 @@ async function main() {
         (0, HostingShutdownProcessor_1.processPendingHostingShutdownEvents)()
             .then((count) => {
             if (count > 0) {
-                console.log(`${count} evento(s) de desligamento da Orvitek processado(s).`);
+                console.log(`${count} evento(s) internos da Orvitek processado(s).`);
             }
         })
             .catch((error) => {

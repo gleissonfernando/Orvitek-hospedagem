@@ -110,23 +110,25 @@ Variaveis necessarias:
 
 ```env
 API_PORT=3000
-API_PUBLIC_URL=https://sua-api-exemplo.invalid
-HOSTING_BOT_API_URL=https://sua-api-exemplo.invalid
+API_PUBLIC_URL=https://sua-api-hospedagem.exemplo
+HOSTING_BOT_API_URL=https://sua-api-hospedagem.exemplo
 MONGODB_URI=
 MONGODB_DB_NAME=orvitek
 MONGODB_HOSTING_EVENTS_COLLECTION=hosting_shutdown_events
-MONGODB_HOSTING_REGISTRATION_PERMISSIONS_COLLECTION=hosting_registration_permissions
+MONGODB_HOSTING_PERMISSIONS_COLLECTION=hosting_registration_permissions
 MONGODB_MIN_POOL_SIZE=5
 MONGODB_MAX_POOL_SIZE=100
 BOT_TOKEN_ENCRYPTION_KEY=chave_base64_de_32_bytes
 ORVITEK_API_KEY=chave_secreta_compartilhada_com_o_bot_orvitek
-ORVITEK_HOSTING_BOT_URL=https://sua-api-exemplo.invalid/caminho-interno
+ORVITEK_HOSTING_BOT_URL=https://sua-api-hospedagem.exemplo/api/orvitek/desligar
 ORVITEK_HOSTING_BOT_TOKEN=token_para_post_http_da_orvitek
 ORVITEK_HOSTING_BOT_DEBUG=true
-ORVITEK_MAIN_BOT_NOTIFY_URL=
+ORVITEK_MAIN_BOT_NOTIFY_URL=https://bot-vendas-exemplo.invalid/hosting/bot-registered
 ORVITEK_MAIN_BOT_NOTIFY_TOKEN=token_para_notificar_o_bot_principal
 CORS_ORIGIN=https://seu-painel-exemplo.invalid
 ```
+
+Em producao, `API_PUBLIC_URL` e `HOSTING_BOT_API_URL` nao podem ficar como `localhost`. Use a URL HTTPS publica da hospedagem e configure essa mesma URL no bot Orvitek Vendas para ele chamar `/api/hosting-plans/sync-client`, `/api/orvitek/desligar`, `/api/orvitek/religar` e `/api/orvitek/fivem-fac-token`.
 
 Para gerar `BOT_TOKEN_ENCRYPTION_KEY`:
 
@@ -222,10 +224,10 @@ A prioridade para desligamento e o MongoDB. Configure este bot no mesmo banco us
 MONGODB_URI=mongodb://...
 MONGODB_DB_NAME=orvitek
 MONGODB_HOSTING_EVENTS_COLLECTION=hosting_shutdown_events
-MONGODB_HOSTING_REGISTRATION_PERMISSIONS_COLLECTION=hosting_registration_permissions
+MONGODB_HOSTING_PERMISSIONS_COLLECTION=hosting_registration_permissions
 ```
 
-A cada 5 segundos, a API busca documentos pendentes em `hosting_shutdown_events`. Para desligamento imediato, prefira chamar `POST /api/orvitek/desligar`.
+A cada 5 segundos, a API busca documentos pendentes em `hosting_shutdown_events`. Para acoes imediatas, prefira chamar `POST /api/orvitek/desligar` ou `POST /api/orvitek/religar`.
 
 ```json
 {
@@ -244,6 +246,7 @@ A cada 5 segundos, a API busca documentos pendentes em `hosting_shutdown_events`
 ```
 
 Quando pega um evento, a API marca como `processing`, usa `payload.hosting.accessKey` ou `clientId` para localizar a hospedagem do cliente, desliga o bot correspondente e atualiza o documento para `processed` ou `failed`. O documento nao e apagado.
+Se `payload.action.type` for `restore_client_hosting`, o mesmo worker marca o plano como ativo, libera `hostingAccessGranted` e tenta religar o bot hospedado.
 
 Estados gravados no evento:
 
@@ -378,6 +381,33 @@ Em erro:
 
 Quando `ORVITEK_HOSTING_BOT_DEBUG=true`, a rota mostra no console quando recebeu o POST do Orvitek Vendas, validou token, consultou `accessKey`, desligou o bot e enviou a resposta.
 
+Para religar apos pagamento confirmado, envie o mesmo formato com:
+
+```http
+POST /api/orvitek/religar
+Authorization: Bearer ORVITEK_HOSTING_BOT_TOKEN
+Content-Type: application/json
+```
+
+Campos esperados:
+
+```json
+{
+  "event": "hosting.payment_confirmed.restore",
+  "eventId": "guildId:userId:pagamento",
+  "sentAt": "2026-05-23T00:00:00.000Z",
+  "hosting": {
+    "accessKey": "chave-de-acesso",
+    "dueAt": "2026-06-22T00:00:00.000Z"
+  },
+  "action": {
+    "type": "restore_client_hosting"
+  }
+}
+```
+
+Em sucesso, a API marca `planStatus` como `active`, libera `hostingAccessGranted`, atualiza `lastPaymentAt` e tenta iniciar o bot do cliente quando houver token salvo.
+
 ## Permissao de cadastro por pagamento
 
 Antes de ativar/hospedar um bot, a API consulta a colecao MongoDB `hosting_registration_permissions`.
@@ -405,7 +435,7 @@ Quando um bot de cliente for cadastrado com sucesso, esta API pode avisar o bot 
 Configure neste bot de hospedagem:
 
 ```env
-ORVITEK_MAIN_BOT_NOTIFY_URL=https://bot-principal-exemplo.invalid/caminho-interno
+ORVITEK_MAIN_BOT_NOTIFY_URL=https://bot-principal-exemplo.invalid/hosting/bot-registered
 ORVITEK_MAIN_BOT_NOTIFY_TOKEN=token_compartilhado_com_o_bot_principal
 ```
 
@@ -445,7 +475,7 @@ Se `ORVITEK_MAIN_BOT_NOTIFY_URL` estiver vazio, o cadastro funciona sem tentar a
 Para criar o codigo de ativacao de 4 digitos apos pagamento confirmado, o bot principal pode chamar:
 
 ```http
-POST /api/orvitek/activation-code
+POST /api/orvitek/fivem-fac-token
 Authorization: Bearer ORVITEK_HOSTING_BOT_TOKEN
 Content-Type: application/json
 ```
@@ -461,7 +491,7 @@ Payload:
 }
 ```
 
-A rota antiga `POST /api/orvitek/fivem-fac-token` continua funcionando como compatibilidade.
+A rota antiga `POST /api/orvitek/activation-code` continua funcionando como compatibilidade. Se o mesmo `guildId` e codigo ja estiverem associados a outro cliente, ou o codigo ja tiver sido usado, a API responde `409`.
 
 `POST /api/user-bots/connect` recebe:
 
@@ -567,5 +597,5 @@ Em producao, o campo `Token do bot` precisa conter um token real de bot para o D
 Em producao, `API_PUBLIC_URL` deve ser uma URL HTTPS publica, por exemplo:
 
 ```env
-API_PUBLIC_URL=https://sua-api-exemplo.invalid
+API_PUBLIC_URL=https://sua-api-hospedagem.exemplo
 ```

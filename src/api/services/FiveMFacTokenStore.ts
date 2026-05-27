@@ -82,6 +82,13 @@ type FiveMTokenEntry = {
   record: FiveMTokenRecord;
 };
 
+export class FiveMFacTokenConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FiveMFacTokenConflictError";
+  }
+}
+
 const dataDir = path.join(process.cwd(), "data");
 const fivemFacPath = path.join(dataDir, "fivem-fac.json");
 
@@ -248,13 +255,22 @@ export function createFiveMFacToken(input: {
   token: string;
   createdBy: string;
   userId?: string | null;
-}): FiveMTokenRecord {
+}): { record: FiveMTokenRecord; created: boolean } {
   const store = readStore();
   const guildStore = getGuildStore(store, input.guildId);
   const existing = guildStore.tokens[input.token];
 
-  if (existing?.status === "available") {
-    throw new Error("Token ja existe e ainda nao foi utilizado neste servidor.");
+  if (existing) {
+    const sameOwner = (existing.createdForUserId || null) === (input.userId || null);
+    const sameCreator = existing.createdBy === input.createdBy;
+
+    if (existing.status === "available" && sameOwner && sameCreator) {
+      return { record: existing, created: false };
+    }
+
+    throw new FiveMFacTokenConflictError(existing.status === "used"
+      ? "Token ja foi utilizado neste servidor."
+      : "Token ja existe e esta associado a outro cliente neste servidor.");
   }
 
   const record: FiveMTokenRecord = {
@@ -268,7 +284,7 @@ export function createFiveMFacToken(input: {
 
   guildStore.tokens[input.token] = record;
   writeStore(store);
-  return record;
+  return { record, created: true };
 }
 
 export function hasFiveMFacAccess(guildId: string, userId: string): boolean {

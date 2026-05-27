@@ -13,66 +13,65 @@ function isAuthorized(authorization) {
     }
     return authorization === `Bearer ${config_1.apiConfig.orvitekHostingBotToken}`;
 }
-function debug(message) {
+function debug(scope, message) {
     if (config_1.apiConfig.orvitekHostingBotDebug) {
-        console.log(`[orvitek/desligar] ${message}`);
+        console.log(`[orvitek/${scope}] ${message}`);
     }
 }
-router.post("/desligar", async (req, res) => {
-    debug("POST recebido do Orvitek Vendas");
-    if (!isAuthorized(req.header("authorization"))) {
-        debug("token invalido");
-        res.status(401).json({
-            ok: false,
-            message: "Nao autorizado"
-        });
+function requireInternalAuth(req, res, scope) {
+    if (isAuthorized(req.header("authorization"))) {
+        debug(scope, "token validado");
+        return true;
+    }
+    debug(scope, "token ausente ou invalido");
+    res.status(401).json({
+        ok: false,
+        message: "Nao autorizado"
+    });
+    return false;
+}
+async function handleHostingAction(req, res, action) {
+    debug(action, "POST recebido do bot principal");
+    if (!requireInternalAuth(req, res, action)) {
         return;
     }
-    debug("token validado");
-    debug(`payload recebido=${JSON.stringify(req.body || {})}`);
-    debug(`accessKey consultada=${req.body?.hosting?.accessKey || ""}`);
+    debug(action, `eventId=${req.body?.eventId || "sem_eventId"} accessKey=${req.body?.hosting?.accessKey || "sem_accessKey"} action=${req.body?.action?.type || "sem_action"}`);
     try {
-        const result = await (0, HostingShutdownProcessor_1.shutdownHostingFromPayload)(req.body || {});
+        const result = action === "desligar"
+            ? await (0, HostingShutdownProcessor_1.shutdownHostingFromPayload)(req.body || {})
+            : await (0, HostingShutdownProcessor_1.restoreHostingFromPayload)(req.body || {});
         if (result.result === "nao_encontrado") {
-            const body = {
+            res.status(404).json({
                 ok: false,
-                message: "Bot não encontrado para essa accessKey",
+                message: result.message,
                 eventId: result.eventId,
                 accessKey: result.accessKey
-            };
-            debug(`resposta enviada=${JSON.stringify(body)}`);
-            res.status(404).json(body);
+            });
             return;
         }
-        const body = {
+        res.json({
             ok: true,
-            message: "Bot desligado com sucesso",
+            message: result.message,
             eventId: result.eventId,
-            accessKey: result.accessKey
-        };
-        debug("bot desligado");
-        debug(`resposta enviada=${JSON.stringify(body)}`);
-        res.json(body);
+            accessKey: result.accessKey,
+            clientId: result.clientId,
+            botStatus: result.botStatus
+        });
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "Erro desconhecido";
-        console.log(`[orvitek/desligar] eventId=${req.body?.eventId || "sem_eventId"} userId=${req.body?.client?.userId || "sem_userId"} projectName=${req.body?.hosting?.projectName || "sem_projectName"} accessKey=${req.body?.hosting?.accessKey || "sem_accessKey"} action=${req.body?.action?.type || "sem_action"} resultado=erro error=${message}`);
-        const body = {
+        const statusCode = (0, HostingShutdownProcessor_1.isHostingPayloadValidationError)(error) ? 400 : 500;
+        console.log(`[orvitek/${action}] eventId=${req.body?.eventId || "sem_eventId"} userId=${req.body?.client?.userId || "sem_userId"} projectName=${req.body?.hosting?.projectName || "sem_projectName"} accessKey=${req.body?.hosting?.accessKey || "sem_accessKey"} action=${req.body?.action?.type || "sem_action"} resultado=erro error=${message}`);
+        res.status(statusCode).json({
             ok: false,
-            message: "Erro ao desligar bot",
+            message: statusCode === 400 ? "Payload invalido" : `Erro ao ${action} bot`,
             error: message
-        };
-        debug(`resposta enviada=${JSON.stringify(body)}`);
-        res.status(500).json(body);
-    }
-});
-async function handleActivationCodeCreate(req, res) {
-    if (!isAuthorized(req.header("authorization"))) {
-        console.log("[orvitek/activation-code] nao autorizado");
-        res.status(401).json({
-            ok: false,
-            message: "Nao autorizado"
         });
+    }
+}
+async function handleActivationCodeCreate(req, res) {
+    const scope = req.path.includes("fivem-fac-token") ? "fivem-fac-token" : "activation-code";
+    if (!requireInternalAuth(req, res, scope)) {
         return;
     }
     const guildId = String(req.body?.guildId || "").trim();
@@ -100,23 +99,38 @@ async function handleActivationCodeCreate(req, res) {
         });
         return;
     }
+    if (!createdBy) {
+        res.status(400).json({
+            ok: false,
+            message: "createdBy invalido"
+        });
+        return;
+    }
     try {
-        const record = (0, FiveMFacTokenStore_1.createFiveMFacToken)({ guildId, token, createdBy, userId: userId || null });
-        console.log(`[orvitek/activation-code] codigo criado como available guildId=${guildId} userId=${userId || "n/a"} createdBy=${createdBy} code=${token}`);
-        res.json({
+        const result = (0, FiveMFacTokenStore_1.createFiveMFacToken)({ guildId, token, createdBy, userId: userId || null });
+        console.log(`[orvitek/${scope}] codigo ${result.created ? "criado" : "ja existente"} como available guildId=${guildId} userId=${userId || "n/a"} createdBy=${createdBy}`);
+        res.status(result.created ? 201 : 200).json({
             ok: true,
-            token,
-            status: record.status,
-            guildId
+            status: result.record.status,
+            guildId,
+            created: result.created
         });
     }
     catch (error) {
-        console.log(`[orvitek/activation-code] falha ao criar codigo guildId=${guildId} userId=${userId || "n/a"} code=${token} error=${error instanceof Error ? error.message : "erro desconhecido"}`);
-        res.status(409).json({
+        const message = error instanceof Error ? error.message : "Nao foi possivel registrar o token";
+        const statusCode = error instanceof FiveMFacTokenStore_1.FiveMFacTokenConflictError ? 409 : 500;
+        console.log(`[orvitek/${scope}] falha ao criar codigo guildId=${guildId} userId=${userId || "n/a"} error=${message}`);
+        res.status(statusCode).json({
             ok: false,
-            message: error instanceof Error ? error.message : "Nao foi possivel registrar o token"
+            message
         });
     }
 }
-router.post("/activation-code", handleActivationCodeCreate);
+router.post("/desligar", (req, res) => {
+    handleHostingAction(req, res, "desligar");
+});
+router.post("/religar", (req, res) => {
+    handleHostingAction(req, res, "religar");
+});
 router.post("/fivem-fac-token", handleActivationCodeCreate);
+router.post("/activation-code", handleActivationCodeCreate);

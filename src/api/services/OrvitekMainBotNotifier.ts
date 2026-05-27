@@ -20,8 +20,14 @@ type BotRegisteredNotification = {
   };
 };
 
+async function responsePreview(response: Response): Promise<string> {
+  const text = await response.text().catch(() => "");
+  return text.slice(0, 500);
+}
+
 export async function notifyMainBotBotRegistered(bot: LocalUserBot, status: string): Promise<void> {
   if (!apiConfig.orvitekMainBotNotifyUrl) {
+    console.warn(`[orvitek-main-notify] pulada: ORVITEK_MAIN_BOT_NOTIFY_URL vazia clientId=${bot.clientId}`);
     return;
   }
 
@@ -47,6 +53,7 @@ export async function notifyMainBotBotRegistered(bot: LocalUserBot, status: stri
   try {
     const response = await fetch(apiConfig.orvitekMainBotNotifyUrl, {
       method: "POST",
+      signal: AbortSignal.timeout(10000),
       headers: {
         "content-type": "application/json",
         ...(apiConfig.orvitekMainBotNotifyToken
@@ -57,8 +64,11 @@ export async function notifyMainBotBotRegistered(bot: LocalUserBot, status: stri
     });
 
     if (!response.ok) {
-      console.error(`Notificacao ao bot principal falhou: HTTP ${response.status}`);
+      console.error(`Notificacao ao bot principal falhou: HTTP ${response.status} body=${await responsePreview(response)}`);
+      return;
     }
+
+    console.log(`[orvitek-main-notify] bot cadastrado notificado clientId=${bot.clientId} status=${status}`);
   } catch (error) {
     console.error("Nao foi possivel notificar o bot principal:", error instanceof Error ? error.message : error);
   }
